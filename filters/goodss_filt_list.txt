@@ -1,0 +1,15 @@
+filters/VIMOS_U.txt
+filters/f435w.txt
+filters/f606w.txt
+filters/f775w.txt
+filters/f850lp.txt
+filters/f098m.txt
+filters/f105w.txt
+filters/f125w.txt
+filters/f160w.txt
+filters/ISAAC_Ks.txt
+filters/HAWKI_K.txt
+filters/IRAC1.txt
+filters/IRAC2.txt
+filters/IRAC3.txt
+filters/IRAC4.txt
