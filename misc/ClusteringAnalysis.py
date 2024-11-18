@@ -194,7 +194,7 @@ class ClusteringAnalysis:
 # Example usage:
 if __name__ == "__main__":
     # Load data
-    df = pd.read_csv('data/E-INSPIRE_I_master_catalogue.csv')
+    df = pd.read_csv('../data/E-INSPIRE_I_master_catalogue.csv')
 
     # Initialize clustering analysis
     ca = ClusteringAnalysis()
