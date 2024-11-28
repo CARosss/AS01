@@ -11,7 +11,7 @@ import os
 import matplotlib.pyplot as plt
 import re
 
-def main(spectra):
+def main(spectra, factor, cluster_name):
     import numpy as np
     data = []
 
@@ -20,19 +20,23 @@ def main(spectra):
         good_idx = np.isfinite(flux) & np.isfinite(ivar)
         wave, flux, ivar = wave[good_idx], flux[good_idx], ivar[good_idx]
 
-        # Simple normalization by median flux
-        median_flux = np.median(flux)
+        # normalise to flux at 5300
+        target_wavelength = 5300
+        tolerance = 2
+        closest_idx = np.argmin(np.abs(wave - target_wavelength))
+        normalizing_wave = wave[closest_idx]
 
-        # normalize by 5300 instead
-        area = wave[wave > 5200]
-        area = area[area < 5400]
-        if len(area) < 1:
-            print("ERROR")
+        if abs(normalizing_wave - target_wavelength) > tolerance:
+            raise ValueError(f"Closest wavelength {normalizing_wave:.2f} is more than "
+                             f"{tolerance}Å from target {target_wavelength}Å")
 
-        normalizing_wave = np.median(area)
+        normalizing_flux = flux[closest_idx]
 
-        flux = flux / normalizing_wave
-        ivar = ivar * (normalizing_wave ** 2)
+        if not np.isfinite(normalizing_flux) or normalizing_flux == 0:
+            raise ValueError(f"Invalid normalizing flux value: {normalizing_flux}")
+
+        flux = flux / normalizing_flux
+        ivar = ivar * (normalizing_flux ** 2)
 
         return wave, flux, ivar
 
@@ -48,6 +52,7 @@ def main(spectra):
 
             wavelength = 10 ** loglam
             wavelength *= 1 / (1 + z)
+
             wavelength, flux, ivar = clean_and_normalize_spectrum(wavelength, flux, ivar)
 
             return wavelength, flux, ivar
@@ -78,6 +83,9 @@ def main(spectra):
         vdisps.append(float(vd))
 
         data.append([wave, flux, ivar])
+
+    mgfe_avg = np.mean(mgfe)
+    print("mgfe avg:", mgfe_avg)
 
     mgfe_avg = round(np.mean(mgfe), 1)  # Rounds to nearest 0.1
     vd_avg = round(np.mean(vdisps), 1)  # Rounds to nearest 0.1
@@ -218,78 +226,117 @@ def main(spectra):
 
 
     wavelength, flux, combined_ivar = combine_spectra(resampled_data)
-    # wavelength, flux, combined_ivar = combine_spectra(smoothed)
 
-    errors = safe_errors(combined_ivar)  # use combined_ivar instead of ivar
+    """
+    IF WE USE JOHN'S SCRIPT I DONT THINK WE NEED ANYTHING MORE THAN THE ABOVE DATA! JUST NEED TO WRITE IT OUT INTO A 
+    FITS FILE. 
+    """
+
+    def run_fit():
+
+        # wavelength, flux, combined_ivar = combine_spectra(smoothed)
+
+        errors = safe_errors(combined_ivar)  # use combined_ivar instead of ivar
 
 
-    lam_gal = wavelength
-    ln_lam_gal = np.log(lam_gal)  # Natural logarithm
-    d_ln_lam_gal = (ln_lam_gal[-1] - ln_lam_gal[0]) / (ln_lam_gal.size - 1)  # Use full lam range for accuracy
-    velscale = c * d_ln_lam_gal
-    # Velocity scale in km/s per pixel (eq.8 of Cappellari 2017)
-    factor = 0.000015
-    # factor = 0.001635
+        lam_gal = wavelength
+        ln_lam_gal = np.log(lam_gal)  # Natural logarithm
+        d_ln_lam_gal = (ln_lam_gal[-1] - ln_lam_gal[0]) / (ln_lam_gal.size - 1)  # Use full lam range for accuracy
+        velscale = c * d_ln_lam_gal
+        # Velocity scale in km/s per pixel (eq.8 of Cappellari 2017)
 
-    noise = np.full_like(flux, factor)  # Assume constant noise per pixel here
+        noise = np.full_like(flux, factor)  # Assume constant noise per pixel here
 
-    dlam_gal = np.gradient(lam_gal)  # Size of every pixel in Angstroms
+        dlam_gal = np.gradient(lam_gal)  # Size of every pixel in Angstroms
 
-    hdul = fits.open('fits_shortlist/spec-0273-51957-0005.fits')
-    coadd = hdul[1].data
-    wdisp = coadd['wdisp']  # assuming that the wdisp is constant between the two spectra for now.
+        hdul = fits.open('fits_shortlist/spec-0273-51957-0005.fits')
+        coadd = hdul[1].data
+        wdisp = coadd['wdisp']  # assuming that the wdisp is constant between the two spectra for now.
 
-    fwhm_gal = 2.355 * wdisp * dlam_gal
+        fwhm_gal = 2.355 * wdisp * dlam_gal
 
-    # sps_name = 'fsps'
-    # sps_name = 'galaxev'
-    sps_name = 'emiles'
-    # sps_name = 'xsl'
+        # sps_name = 'fsps'
+        # sps_name = 'galaxev'
+        sps_name = 'emiles'
+        # sps_name = 'xsl'
 
-    basename = f"spectra_{sps_name}_9.0.npz"
-    ppxf_dir = Path(lib.__file__).parent
-    filename = ppxf_dir / 'sps_models' / basename
-    if not filename.is_file():
-        url = "https://raw.githubusercontent.com/micappe/ppxf_data/main/" + basename
-        request.urlretrieve(url, filename)
+        basename = f"spectra_{sps_name}_9.0.npz"
+        ppxf_dir = Path(lib.__file__).parent
+        filename = ppxf_dir / 'sps_models' / basename
+        if not filename.is_file():
+            url = "https://raw.githubusercontent.com/micappe/ppxf_data/main/" + basename
+            request.urlretrieve(url, filename)
 
-    fwhm_gal_dic = {"lam": lam_gal, "fwhm": fwhm_gal}
-    sps = lib.sps_lib(filename, velscale, fwhm_gal_dic)
+        fwhm_gal_dic = {"lam": lam_gal, "fwhm": fwhm_gal}
+        sps = lib.sps_lib(filename, velscale, fwhm_gal_dic)
 
-    stars_templates = sps.templates.reshape(sps.templates.shape[0], -1)
+        stars_templates = sps.templates.reshape(sps.templates.shape[0], -1)
 
-    lam_range_gal = np.array([np.min(lam_gal), np.max(lam_gal)])
-    gas_templates, gas_names, gas_wave = \
-        util.emission_lines(sps.ln_lam_temp, lam_range_gal, fwhm_gal_dic)
-    templates = np.column_stack([stars_templates, gas_templates])
-    n_temps = stars_templates.shape[1]
+        lam_range_gal = np.array([np.min(lam_gal), np.max(lam_gal)])
+        gas_templates, gas_names, gas_wave = \
+            util.emission_lines(sps.ln_lam_temp, lam_range_gal, fwhm_gal_dic)
+        templates = np.column_stack([stars_templates, gas_templates])
+        n_temps = stars_templates.shape[1]
 
-    component = [0] * n_temps  # Single stellar kinematic component=0 for all templates
-    component += [1] * len(gas_names)  # First 6 gas templates
-    component = np.array(component)
-    moments = [2] * len(np.unique(component))  # Now this will create only 2 sets of moments (stars and gas)
+        component = [0] * n_temps  # Single stellar kinematic component=0 for all templates
+        component += [1] * len(gas_names)  # First 6 gas templates
+        component = np.array(component)
+        moments = [2] * len(np.unique(component))  # Now this will create only 2 sets of moments (stars and gas)
 
-    #print(component.shape)
-    #print(templates.shape)
-    vel0 = c * np.log(1)  # redshift meant to be in here too, using 1 as default?
-    sol = [vel0, 200]
-    start = [sol for j in range(len(moments))]  # adopt the same starting value for both gas and stars
+        vel0 = c * np.log(1)  # redshift meant to be in here too, using 1 as default?
+        sol = [vel0, 200]
+        start = [sol for j in range(len(moments))]  # adopt the same starting value for both gas and stars
 
-    degree = -1
-    mdegree = 10
-    t = clock()
+        degree = -1
+        mdegree = 10
 
-    pp = ppxf(templates, flux, noise, velscale, start, plot=False,
-              moments=moments, degree=degree, mdegree=mdegree,
-              lam=lam_gal, component=component,
-              gas_component=component > 0, gas_names=gas_names,
-              lam_temp=sps.lam_temp) #, clean=True)
+        pp = ppxf(templates, flux, noise, velscale, start, plot=False,
+                  moments=moments, degree=degree, mdegree=mdegree,
+                  lam=lam_gal, component=component,
+                  gas_component=component > 0, gas_names=gas_names,
+                  lam_temp=sps.lam_temp) #, clean=True)
 
-    #print(f"Elapsed time in pPXF: {(clock() - t):.2f}")
-    pp.plot()
-    plt.title(f"pPXF fit with {sps_name} SPS templates")
-    return pp
+        pp.plot()
+        plt.title(f"pPXF fit with {sps_name} SPS templates")
+        return pp
 
+    # run_fit()
+
+    def create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe, sigma_fin):
+
+        coadd_data = np.zeros(len(wavelength), dtype=[
+            ('flux', 'f8'),
+            ('wave', 'f8'),
+            ('ivar', 'f8'),
+            ('wdisp', 'f8'),
+            ('ALPHA', 'f8'),
+            ('sigma', 'f8')
+        ])
+
+        coadd_data['flux'] = flux
+        coadd_data['wave'] = wavelength
+        coadd_data['ivar'] = combined_ivar
+        # coadd_data['wdisp'] = np.full_like(wavelength, 2.76)  # SDSS instrumental resolution
+        coadd_data['ALPHA'] = mgfe
+        coadd_data['sigma'] = sigma_fin
+
+        # Create the HDUs
+        primary_hdu = fits.PrimaryHDU()
+        coadd_hdu = fits.BinTableHDU(data=coadd_data, name='COADD')
+
+        # Add minimal header info needed by analysis script
+        primary_hdu.header['HIERARCH NAME'] = f'stacked_{cluster_name}'
+        primary_hdu.header['HIERARCH z'] = 0  # Since already rest-framed
+
+        # Create HDUList and write to file
+        hdul = fits.HDUList([primary_hdu, coadd_hdu])
+        output_file = f'output_fits/stacked_{cluster_name}.fits'
+        hdul.writeto(output_file, overwrite=True)
+
+        return output_file
+
+    create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe_avg, sigma_fin)
+    return None
 
 
 
@@ -302,11 +349,45 @@ For testing purposes we select the high dor cluster from hierarchical clustering
 
 files = ["cluster_results/k-means_clusters.csv", "cluster_results/gmm_clusters.csv",
          "cluster_results/hierarchical_clusters.csv"]
+
+hierarchical = pd.read_csv(files[2])
+kmeans = pd.read_csv(files[0])
+gmm = pd.read_csv(files[1])
+catalogue = pd.read_csv("data/E-INSPIRE_I_master_catalogue.csv")
+
+# Create file lists for DoR ranges
+dor_clusters = []
+for threshold in [(0.6, float('inf')), (0.3, 0.6), (0, 0.3)]:
+    dor_group = catalogue[(catalogue['DoR'] > threshold[0]) & (catalogue['DoR'] <= threshold[1])]
+    file_list = [f"spec-{int(plate):04d}-{int(mjd):05d}-{int(fiber):04d}.fits"
+                 for plate, mjd, fiber in zip(dor_group['plate'], dor_group['mjd'], dor_group['fiberid'])]
+    dor_clusters.append(file_list)
+
+cluster_groups = {
+    'DoR': dor_clusters,
+    'Hierarchical': [hierarchical[hierarchical["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)],
+    'KMeans': [kmeans[kmeans["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)],
+    'GMM': [gmm[gmm["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)]
+}
+
+labels = {method: [f"{method}_{i}" for i in range(3)] for method in cluster_groups.keys()}
+colors = ['red', 'blue', 'green']
+n = 0.001635
+factor = [n*4, n*2.7, n*2.5]
+
+for method, groups in cluster_groups.items():
+    print(f"\nProcessing {method} clustering")
+    for idx, (spectra, color, label) in enumerate(zip(groups, colors, labels[method])):
+        print(f"Fitting {label}")
+        main(spectra, factor[idx], label)
+
+"""
 filename = files[2]  # selecting hierarchical for now
 clusters = pd.read_csv(filename)
 two = clusters[clusters["Cluster"] == 2]["SDSS_ID"].tolist()  # list of file names selecting cluster 2
 one = clusters[clusters["Cluster"] == 1]["SDSS_ID"].tolist()  # selecting 1
 zero = clusters[clusters["Cluster"] == 0]["SDSS_ID"].tolist()  # selecting 0
+
 
 # Now we also try using actual DoR ranges
 all = pd.read_csv("data/E-INSPIRE_I_master_catalogue.csv")
@@ -324,71 +405,43 @@ low = all[all['DoR'] < 0.3]
 low_ids = [f"spec-{int(plate):04d}-{int(mjd):05d}-{int(fiber):04d}.fits"
            for plate, mjd, fiber in zip(low['plate'], low['mjd'], low['fiberid'])]
 
-spectra = high_ids  # change to whichever you want
-"""
-
-
-# plt.figure(figsize=(15, 12))
-
-colors = ['red', 'blue', 'green']
-labels = ['High DoR', 'Medium DoR', 'Low DoR']
-
-for idx, (spectra, color, label) in enumerate(zip([high_ids, med_ids, low_ids], colors, labels)):
-    print("\n"*5)
-    print("NOW FITTING:", label)
-    pp = main(spectra)
-
-    plt.plot(pp.lam, pp.galaxy, color=color, alpha=0.5, label=f'{label} Data')
-    plt.plot(pp.lam, pp.bestfit, color='black', linestyle='--', label='Best Fit')
-    plt.legend()
-    plt.ylabel('Flux')
-    # plt.ylim(0.0009, 0.007)
-    # plt.xlim(0.35, 0.75)
-    plt.show()"""
-
-"""    plt.subplot(3, 1, idx + 1)
-    plt.plot(pp.lam, pp.galaxy, color=color, alpha=0.5, label=f'{label} Data')
-    plt.plot(pp.lam, pp.bestfit, color='black', linestyle='--', label='Best Fit')
-    plt.legend()
-    plt.ylabel('Flux')
-    if idx == 2:
-        plt.xlabel('Wavelength (Å)')
-
-plt.tight_layout()
-plt.show()"""
+# spectra = high_ids  # change to whichever you want
 
 
 plt.figure(figsize=(15, 6))  # Single larger plot
 
 colors = ['red', 'blue', 'green']
-labels = ['High DoR', 'Medium DoR', 'Low DoR']
+labels_arr = [['High_DoR', 'Medium_DoR', 'Low_DoR'], ['cluster_0', 'cluster_1', 'cluster_2']*3]
+labels = ['High_DoR', 'Medium_DoR', 'Low_DoR']
 pp_results = []  # Store all pp objects
+n = 0.001635
+factor = [ n*4,  n*2.7,  n*2.5]
 
 # First run all fits
 for idx, (spectra, color, label) in enumerate(zip([high_ids, med_ids, low_ids], colors, labels)):
     print("\n"*5)
     print("NOW FITTING:", label)
-    pp = main(spectra)
+    pp = main(spectra, factor[idx], label)
     pp_results.append(pp)
 
-for pp, color, label in zip(pp_results, colors, labels):
-    plt.plot(pp.lam, pp.galaxy, color=color, alpha=0.5, label=f'{label} Data')
-    plt.plot(pp.lam, pp.bestfit, color='black', linestyle='--', alpha=0.3, label=f'{label} Fit')
+"""
+"""plotting = 0
+if plotting ==1:
+    for pp, color, label in zip(pp_results, colors, labels):
+        plt.plot(pp.lam, pp.galaxy, color=color, alpha=0.5, label=f'{label} Data')
+        plt.plot(pp.lam, pp.bestfit, color='black', linestyle='--', alpha=0.3, label=f'{label} Fit')
 
-plt.legend()
-plt.ylabel('Flux')
-plt.xlabel('Wavelength (Å)')
-plt.title('Comparison of DoR Groups with Best Fits')
+    plt.legend()
+    plt.ylabel('Flux')
+    plt.xlabel('Wavelength (Å)')
+    plt.title('Comparison of DoR Groups with Best Fits')
 
-# Find global min/max for consistent axes
-y_min = min([pp.galaxy.min() for pp in pp_results])
-y_max = max([pp.galaxy.max() for pp in pp_results])
-x_min = min([pp.lam.min() for pp in pp_results])
-x_max = max([pp.lam.max() for pp in pp_results])
+    y_min = min([pp.galaxy.min() for pp in pp_results])
+    y_max = max([pp.galaxy.max() for pp in pp_results])
+    x_min = min([pp.lam.min() for pp in pp_results])
+    x_max = max([pp.lam.max() for pp in pp_results])
+    plt.ylim(y_min - 0.1 * abs(y_min), y_max + 0.1 * abs(y_max))
+    plt.xlim(x_min, x_max)
 
-# Add some padding to the limits
-plt.ylim(y_min - 0.1 * abs(y_min), y_max + 0.1 * abs(y_max))
-plt.xlim(x_min, x_max)
-
-plt.tight_layout()
-plt.show()
+    plt.tight_layout()
+    plt.show()"""
