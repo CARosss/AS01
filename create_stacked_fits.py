@@ -70,6 +70,9 @@ def main(spectra, factor, cluster_name):
     catalogue = pd.read_csv('data/E-INSPIRE_I_master_catalogue.csv')
     mgfe = []
     vdisps = []
+    ages = []
+    metallicity = []
+    DoRs = []
 
     for filename in spectra:
         wave, flux, ivar = load_spectrum("fits_shortlist/" + filename)  # data[0]
@@ -78,14 +81,28 @@ def main(spectra, factor, cluster_name):
         matching_row = catalogue[(catalogue['plate'] == plate) &
                                  (catalogue['mjd'] == mjd) &
                                  (catalogue['fiberid'] == fiber)]
-        mgfe.append(float(matching_row['MgFe']))
-        vd = matching_row["velDisp_ppxf_res"]
+
+        mgfe.append(float(matching_row['MgFe'].iloc[0]))
+        vd = matching_row["velDisp_ppxf_res"].iloc[0]
         vdisps.append(float(vd))
+        ages.append(matching_row['age_mean_mass'])
+        metallicity.append(matching_row['[M/H]_mean_mass'])
+        DoRs.append(float(matching_row['DoR'].iloc[0]))
+
 
         data.append([wave, flux, ivar])
 
-    mgfe_avg = np.mean(mgfe)
-    print("mgfe avg:", mgfe_avg)
+    print(f"STATS: ({len(spectra)} items)")
+    print("--> Max vdisp:", max(vdisps))
+    print("--> mgfe avg:", np.mean(mgfe))
+    print("--> age avg:", np.mean(ages))
+    print("--> metallicity avg:", np.mean(metallicity))
+    print("--> DoR avg:", np.mean(DoRs))
+    print("s.dev's:")
+    print("--> mgfe std:", np.std(mgfe))
+    print("--> age std:", np.std(ages))
+    print("--> metallicity std:", np.std(metallicity))
+    print("--> DoR std:", np.std(DoRs))
 
     mgfe_avg = round(np.mean(mgfe), 1)  # Rounds to nearest 0.1
     vd_avg = round(np.mean(vdisps), 1)  # Rounds to nearest 0.1
@@ -330,7 +347,7 @@ def main(spectra, factor, cluster_name):
 
         # Create HDUList and write to file
         hdul = fits.HDUList([primary_hdu, coadd_hdu])
-        output_file = f'output_fits/stacked_{cluster_name}.fits'
+        output_file = f'stacked_fits/stacked_{cluster_name}.fits'
         hdul.writeto(output_file, overwrite=True)
 
         return output_file
@@ -338,14 +355,6 @@ def main(spectra, factor, cluster_name):
     create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe_avg, sigma_fin)
     return None
 
-
-
-"""Choosing a list of .fits files to stack:
-
-For testing purposes we select the high dor cluster from hierarchical clustering and form a list, data, in which each element is a list of 
-[wave, flux, ivar] for one spectrum
-
-"""
 
 files = ["cluster_results/k-means_clusters.csv", "cluster_results/gmm_clusters.csv",
          "cluster_results/hierarchical_clusters.csv"]
@@ -367,21 +376,58 @@ cluster_groups = {
     'DoR': dor_clusters,
     'Hierarchical': [hierarchical[hierarchical["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)],
     'KMeans': [kmeans[kmeans["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)],
-    'GMM': [gmm[gmm["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)]
+    'GMM': [gmm[gmm["Cluster"] == i]["SDSS_ID"].tolist() for i in range(max(gmm["Cluster"]) + 1)]
+    #'GMM': [gmm[gmm["Cluster"] == i]["SDSS_ID"].tolist() for i in range(3)]
 }
 
-labels = {method: [f"{method}_{i}" for i in range(3)] for method in cluster_groups.keys()}
 colors = ['red', 'blue', 'green']
 n = 0.001635
-factor = [n*4, n*2.7, n*2.5]
+factor = [n * 4, n * 2.7, n * 2.5]
 
 for method, groups in cluster_groups.items():
+    print(f"\n================================")
+    # print(f"Processing {method} clustering")
+    method_labels = [f"{method}_{i}" for i in range(len(groups))]
+    method_colors = colors[:len(groups)]
+    method_factors = factor[:len(groups)]
+
+    for idx, (spectra, color, label, factor_val) in enumerate(
+            zip(groups, method_colors, method_labels, method_factors)):
+        print(f"\nStacking {label}")
+        main(spectra, factor_val, label)
+    print(f"================================")
+
+
+"""labels = {method: [f"{method}_{i}" for i in range(3)] for method in cluster_groups.keys()}
+#colors = ['red', 'blue', 'green']
+n = 0.001635
+#factor = [n*4, n*2.7, n*2.5]
+
+for method, groups in cluster_groups.items():
+    print(f"================================")
     print(f"\nProcessing {method} clustering")
+    labels = [f"{method}_{i}" for i in range(len(groups))]
+    colors = ['red', 'blue', 'green'][:len(groups)]
+    factor = [n*4, n*2.7, n*2.5][:len(groups)]
+
     for idx, (spectra, color, label) in enumerate(zip(groups, colors, labels[method])):
-        print(f"Fitting {label}")
+        print(f"\nFitting {label}")
         main(spectra, factor[idx], label)
+    print(f"================================")
+
 
 """
+
+
+"""
+Choosing a list of .fits files to stack:
+
+For testing purposes we select the high dor cluster from hierarchical clustering and form a list, data, in which each element is a list of 
+[wave, flux, ivar] for one spectrum
+
+For actually fitting each one:
+
+
 filename = files[2]  # selecting hierarchical for now
 clusters = pd.read_csv(filename)
 two = clusters[clusters["Cluster"] == 2]["SDSS_ID"].tolist()  # list of file names selecting cluster 2
@@ -424,8 +470,7 @@ for idx, (spectra, color, label) in enumerate(zip([high_ids, med_ids, low_ids], 
     pp = main(spectra, factor[idx], label)
     pp_results.append(pp)
 
-"""
-"""plotting = 0
+plotting = 0
 if plotting ==1:
     for pp, color, label in zip(pp_results, colors, labels):
         plt.plot(pp.lam, pp.galaxy, color=color, alpha=0.5, label=f'{label} Data')

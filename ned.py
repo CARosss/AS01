@@ -146,6 +146,6 @@ class NedCalculator:
             return f"{self.zage_Gyr:.2f} {self.DCMR_Mpc:.2f} {self.kpc_DA:.2f} {self.get_distance_modulus():.2f}"
 
 # Example usage:
-ned_calculator = NedCalculator(z=1.0, H0=70, WM=0.3, WV=0.7, verbose=1)
+"""ned_calculator = NedCalculator(z=1.0, H0=70, WM=0.3, WV=0.7, verbose=1)
 print(ned_calculator.get_verbose_output())
-print(ned_calculator.get_age_Gyr())
+print(ned_calculator.get_age_Gyr())"""
