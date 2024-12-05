@@ -232,7 +232,7 @@ def make_catalogue(file_names, method):
     metals = []
     snrs = []
 
-    nrand = 1
+    nrand = 9
 
     col_line1 = 'black'  # gdago: here you choose the color of the line
     col_line2 = 'green'  # gdago: here you choose the color of the line
@@ -418,7 +418,7 @@ def make_catalogue(file_names, method):
         plt.title(f'PPXF Fit for {name}')
         plt.legend()
         plt.grid(True, alpha=0.2)
-        # plt.show()
+        plt.show()
 
         pp.weights = weights_array.sum(0)
         weights_err = weights_array.std(0)
@@ -557,11 +557,9 @@ def combine_catalogues():
 
 
 
-
-
 def main():
-    # make output directories if they dont exist
-    directories = ['ppxf_fits_test2', 'sfh_plots_test2', 'stacked_catalogues']
+    # make output directories if they don't exist
+    directories = ['ppxf_fits', 'sfh_plots', 'stacked_catalogues']
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory)
