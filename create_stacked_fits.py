@@ -1,3 +1,4 @@
+from os import putenv
 from time import perf_counter as clock
 from pathlib import Path
 from urllib import request
@@ -14,6 +15,7 @@ import re
 def main(spectra, factor, cluster_name):
     import numpy as np
     data = []
+
 
     def clean_and_normalize_spectrum(wave, flux, ivar):
         # Remove NaN and inf values
@@ -34,7 +36,6 @@ def main(spectra, factor, cluster_name):
 
         if not np.isfinite(normalizing_flux) or normalizing_flux == 0:
             raise ValueError(f"Invalid normalizing flux value: {normalizing_flux}")
-
         flux = flux / normalizing_flux
         ivar = ivar * (normalizing_flux ** 2)
 
@@ -170,27 +171,20 @@ def main(spectra, factor, cluster_name):
     # resample using logbinning instead
     def resample_spectrum(wave, flux, ivar, new_wave):
         # Interpolate flux onto new wavelength grid
-        f = interpolate.interp1d(wave, flux, bounds_error=False, fill_value=0)
+        f = interpolate.interp1d(wave, flux, bounds_error=True, fill_value=np.nan)
         new_flux = f(new_wave)
-
-        # Interpolate ivar (need to handle this carefully)
-        f_ivar = interpolate.interp1d(wave, ivar, bounds_error=False, fill_value=0)
+        f_ivar = interpolate.interp1d(wave, ivar, bounds_error=True, fill_value=0)
         new_ivar = f_ivar(new_wave)
 
         return new_flux, new_ivar
 
 
     # Create common wavelength grid
-    wave_min = max([smoothed[i][0][0] for i in range(len(smoothed))])  # Maximum of all minimum wavelengths
-    wave_max = min([smoothed[i][0][-1] for i in range(len(smoothed))])  # Minimum of all maximum wavelengths
-
-    # Create logarithmically spaced wavelength grid
-    # Method 1: using np.logspace
+    wave_min = max([smoothed[i][0][0] for i in range(len(smoothed))]) +0.1 # Maximum of all minimum wavelengths
+    wave_max = min([smoothed[i][0][-1] for i in range(len(smoothed))]) -0.1 # Minimum of all maximum wavelengths
+    num_points = min([len(s[0]) for s in smoothed])
+    print("NUM POINTS::::",num_points)
     wave_common = np.logspace(np.log10(wave_min), np.log10(wave_max), num=3828)
-
-    # OR Method 2: using np.exp(np.linspace)
-    # wave_common = np.exp(np.linspace(np.log(wave_min), np.log(wave_max), num=3828))
-
 
     # Resample all spectra
     resampled_data = []
@@ -198,13 +192,10 @@ def main(spectra, factor, cluster_name):
         new_flux, new_ivar = resample_spectrum(spectrum[0], spectrum[1], spectrum[2], wave_common)
         resampled_data.append([wave_common, new_flux, new_ivar])
 
-    dlambda = np.diff(wave_common)
-    dlambda_over_lambda = dlambda / wave_common[:-1]
-    #print("Δλ/λ values:", dlambda_over_lambda[:5])
-
 
     def safe_combine_ivar(*ivars):
         ivar_stack = np.stack(ivars)
+        N = len(ivars)  # Number of spectra being combined
 
         # Create mask for any invalid values
         mask = np.any((ivar_stack == 0) | np.isinf(ivar_stack), axis=0)
@@ -215,7 +206,7 @@ def main(spectra, factor, cluster_name):
         if np.any(valid):
             # Sum of 1/ivar for valid points
             sum_inv_ivar = np.sum(1.0 / ivar_stack[:, valid], axis=0)
-            combined[valid] = 1.0 / sum_inv_ivar
+            combined[valid] = (N * N) / sum_inv_ivar
 
         return combined
 
@@ -244,11 +235,49 @@ def main(spectra, factor, cluster_name):
 
     wavelength, flux, combined_ivar = combine_spectra(resampled_data)
 
+    def create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe, sigma_fin):
+        # Create structured array for spectral data
+        coadd_data = np.zeros(len(wavelength), dtype=[
+            ('flux', 'f8'),
+            ('wave', 'f8'),
+            ('ivar', 'f8'),
+            ('wdisp', 'f8')
+        ])
+
+        coadd_data['flux'] = flux
+        coadd_data['wave'] = wavelength
+        coadd_data['ivar'] = combined_ivar
+        print("Combined Ivar", combined_ivar)
+
+        coadd_data['wdisp'] = np.full_like(wavelength, 2.76/2.355)
+        print("Wdisp:", coadd_data['wdisp'])
+        print("top lambda:", coadd_data['wave'][:10])
+        print("bottom lambda:", coadd_data['wave'][-10:])
+        print("N_points:", len(coadd_data['wave']))
+        print("flux:",flux)
+
+        primary_hdu = fits.PrimaryHDU()
+        coadd_hdu = fits.BinTableHDU(data=coadd_data, name='COADD')
+
+        primary_hdu.header['HIERARCH NAME'] = f'stacked_{cluster_name}'
+        primary_hdu.header['HIERARCH z'] = 0
+        primary_hdu.header['HIERARCH ALPHA'] = mgfe
+        primary_hdu.header['HIERARCH SIGMA'] = sigma_fin
+
+        hdul = fits.HDUList([primary_hdu, coadd_hdu])
+        output_file = f'stacked_fits/stacked_{cluster_name}.fits'
+        hdul.writeto(output_file, overwrite=True)
+        print(output_file, "has been made.")
+        return output_file
+
+    create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe_avg, sigma_fin)
+
+
+
     """
     IF WE USE JOHN'S SCRIPT I DONT THINK WE NEED ANYTHING MORE THAN THE ABOVE DATA! JUST NEED TO WRITE IT OUT INTO A 
     FITS FILE. 
     """
-
     def run_fit():
 
         # wavelength, flux, combined_ivar = combine_spectra(smoothed)
@@ -269,7 +298,7 @@ def main(spectra, factor, cluster_name):
         hdul = fits.open('fits_shortlist/spec-0273-51957-0005.fits')
         coadd = hdul[1].data
         wdisp = coadd['wdisp']  # assuming that the wdisp is constant between the two spectra for now.
-
+        print("WDISP:", wdisp)
         fwhm_gal = 2.355 * wdisp * dlam_gal
 
         # sps_name = 'fsps'
@@ -316,45 +345,28 @@ def main(spectra, factor, cluster_name):
         pp.plot()
         plt.title(f"pPXF fit with {sps_name} SPS templates")
         return pp
-
     # run_fit()
 
-    def create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe, sigma_fin):
-
-        coadd_data = np.zeros(len(wavelength), dtype=[
-            ('flux', 'f8'),
-            ('wave', 'f8'),
-            ('ivar', 'f8'),
-            ('wdisp', 'f8'),
-            ('ALPHA', 'f8'),
-            ('sigma', 'f8')
-        ])
-
-        coadd_data['flux'] = flux
-        coadd_data['wave'] = wavelength
-        coadd_data['ivar'] = combined_ivar
-        # coadd_data['wdisp'] = np.full_like(wavelength, 2.76)  # SDSS instrumental resolution
-        coadd_data['ALPHA'] = mgfe
-        coadd_data['sigma'] = sigma_fin
-
-        # Create the HDUs
-        primary_hdu = fits.PrimaryHDU()
-        coadd_hdu = fits.BinTableHDU(data=coadd_data, name='COADD')
-
-        # Add minimal header info needed by analysis script
-        primary_hdu.header['HIERARCH NAME'] = f'stacked_{cluster_name}'
-        primary_hdu.header['HIERARCH z'] = 0  # Since already rest-framed
-
-        # Create HDUList and write to file
-        hdul = fits.HDUList([primary_hdu, coadd_hdu])
-        output_file = f'stacked_fits/stacked_{cluster_name}.fits'
-        hdul.writeto(output_file, overwrite=True)
-
-        return output_file
-
-    create_fits(wavelength, flux, combined_ivar, cluster_name, mgfe_avg, sigma_fin)
     return None
 
+
+
+"""
+hdul = fits.open('fits_shortlist/spec-0273-51957-0005.fits')
+coadd = hdul[1].data
+specobj = hdul[2].data
+z = specobj['Z'][0]
+wdisp = coadd['wdisp']/(1+z)
+
+av = np.mean(wdisp)*2.355
+
+print("AVERAGE:", av)
+"""
+
+
+
+if not os.path.exists('stacked_fits'):
+    os.makedirs('stacked_fits')
 
 files = ["cluster_results/k-means_clusters.csv", "cluster_results/gmm_clusters.csv",
          "cluster_results/hierarchical_clusters.csv"]
@@ -398,7 +410,8 @@ for method, groups in cluster_groups.items():
     print(f"================================")
 
 
-"""labels = {method: [f"{method}_{i}" for i in range(3)] for method in cluster_groups.keys()}
+"""
+labels = {method: [f"{method}_{i}" for i in range(3)] for method in cluster_groups.keys()}
 #colors = ['red', 'blue', 'green']
 n = 0.001635
 #factor = [n*4, n*2.7, n*2.5]
@@ -415,11 +428,6 @@ for method, groups in cluster_groups.items():
         main(spectra, factor[idx], label)
     print(f"================================")
 
-
-"""
-
-
-"""
 Choosing a list of .fits files to stack:
 
 For testing purposes we select the high dor cluster from hierarchical clustering and form a list, data, in which each element is a list of 

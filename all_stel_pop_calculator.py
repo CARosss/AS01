@@ -74,7 +74,6 @@ def read_fits_summary(fitsfile):
     agesplot = np.concatenate([agesplot, np.array([agesplot[-1] + (agesplot[-1] - agesplot[-2])])])
     weiplot = np.concatenate([weiplot, np.array([weiplot[-1]])])
 
-    # nedcalc = NedCalculator([z])
     nedcalc = NedCalculator(z)
     univ_age = nedcalc.zage_Gyr
 
@@ -268,8 +267,11 @@ def make_catalogue(file_names, method):
         galaxy = galaxy[(wave > 3600) & (wave < 6500)]
         wave = wave[(wave > 3600) & (wave < 6500)]
 
-        sigma = t['sigma'][0]
-        alpha = t['ALPHA'][0]
+        sigma = hdu[0].header['SIGMA']  # or hdu[0].header['HIERARCH SIGMA']
+        alpha = hdu[0].header['ALPHA']  # or hdu[0].header['HIERARCH ALPHA']
+
+        #sigma = t['sigma'][0]
+        #alpha = t['ALPHA'][0]
         # array of the average alpha (repeated many times for formatting sake)
         # SWAP OUT FOR WHATEVER JOHN CALCULATES!!!
 
@@ -373,7 +375,7 @@ def make_catalogue(file_names, method):
         primary_hdu = fits.PrimaryHDU(header=hdr)
         hdulist = [primary_hdu, hdu_wei, hdu_regdim, hdu_age, hdu_metal, bestfit, lam, orig, gas]
         hdulis = fits.HDUList(hdulist)
-        savepath = './ppxf_fits_test2/'
+        savepath = './ppxf_fits/'
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
@@ -427,7 +429,7 @@ def make_catalogue(file_names, method):
         weights = weights.reshape(reg_dim) / weights.sum()  # Normalized
 
         mean_age = sps.mean_age_metal(weights, quiet=True)
-        sps.mean_age_metal(weights, quiet=True);
+        sps.mean_age_metal(weights, quiet=True)
         logAges.append(mean_age[0])
         metals.append(mean_age[1])
 
@@ -466,7 +468,7 @@ def make_catalogue(file_names, method):
         agesplot, weiplot = plot_sfh(ax1, ppxfout_file_unr, col_line1, legend_on=False)
         agesplot, weiplot = plot_sfh(ax1, ppxfout_file, col_line2, legend_on=False)
 
-        savepath = './sfh_plots_test2/'
+        savepath = './sfh_plots/'
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
